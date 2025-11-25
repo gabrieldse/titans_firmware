@@ -5,12 +5,18 @@
     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
     holding buffers for the duration of a data transfer."
 )]
+// For embassy (RTOS)
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
+use esp_hal::timer::timg::TimerGroup;
+
+// For messaging
+use defmt::info;
 
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
 use esp_hal::gpio::DriveMode;
 use esp_hal::time::Rate;
-use esp_hal::time::{Duration, Instant};
 use {esp_backtrace as _, esp_println as _};
 
 // For LEDC
@@ -18,17 +24,23 @@ use esp_hal::ledc::channel::ChannelIFace;
 use esp_hal::ledc::timer::TimerIFace;
 use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed, channel, timer};
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp33/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[main]
-fn main() -> ! {
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -> ! {
     // generator version: 1.0.1
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
+    // Start timergroup on hardware TIMG0
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0);
+    info!("Embassy initialized!");
+    // TODO: Spawn some tasks
+    let _ = spawner;
+
+    // LEDC setup
     let mut ledc = Ledc::new(peripherals.LEDC);
     let led = peripherals.GPIO5;
 
@@ -49,8 +61,6 @@ fn main() -> ! {
         drive_mode: DriveMode::PushPull,
     })
     .unwrap();
-    
-    
 
     loop {
             channel0.start_duty_fade(0, 100, 200).unwrap();

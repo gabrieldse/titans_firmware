@@ -11,6 +11,7 @@ path = "./src/bin/main.rs"
 [dependencies]
 esp-hal = { version = "1.0.0", features = ["defmt", "esp32", "unstable"] }
 
+esp-rtos = { version = "0.2.0", features = ["defmt", "embassy", "esp32"] }
 
 defmt                  = "1.0.1"
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["defmt", "esp32"] }
@@ -22,6 +23,8 @@ esp-backtrace = { version = "0.18.1", features = [
   "panic-handler",
 ] }
 esp-println = { version = "0.16.1", features = ["defmt-espflash", "esp32"] }
+embassy-executor = "0.9.1"
+embassy-time = "0.5.0"
 
 
 [profile.dev]

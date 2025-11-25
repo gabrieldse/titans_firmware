@@ -1,0 +1,39 @@
+[package]
+edition      = "2024"
+name         = "rc-car"
+rust-version = "1.88"
+version      = "0.1.0"
+
+[[bin]]
+name = "rc-car"
+path = "./src/bin/main.rs"
+
+[dependencies]
+esp-hal = { version = "1.0.0", features = ["defmt", "esp32", "unstable"] }
+
+
+defmt                  = "1.0.1"
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["defmt", "esp32"] }
+
+critical-section = "1.2.0"
+esp-backtrace = { version = "0.18.1", features = [
+  "defmt",
+  "esp32",
+  "panic-handler",
+] }
+esp-println = { version = "0.16.1", features = ["defmt-espflash", "esp32"] }
+
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units    = 1     # LLVM can perform better optimizations using a single thread
+debug            = 2
+debug-assertions = false
+incremental      = false
+lto              = 'fat'
+opt-level        = 's'
+overflow-checks  = false

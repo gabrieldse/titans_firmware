@@ -1072,6 +1072,7 @@ dependencies = [
  "defmt 1.0.1",
  "embassy-executor",
  "embassy-time",
+ "embedded-hal 1.0.0",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",

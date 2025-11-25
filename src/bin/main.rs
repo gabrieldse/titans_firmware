@@ -14,7 +14,6 @@ use esp_hal::timer::timg::TimerGroup;
 use defmt::info;
 
 use esp_hal::clock::CpuClock;
-use esp_hal::main;
 use esp_hal::gpio::DriveMode;
 use esp_hal::time::Rate;
 use {esp_backtrace as _, esp_println as _};
@@ -22,7 +21,10 @@ use {esp_backtrace as _, esp_println as _};
 // For LEDC
 use esp_hal::ledc::channel::ChannelIFace;
 use esp_hal::ledc::timer::TimerIFace;
-use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed, channel, timer};
+use esp_hal::ledc::{ Ledc, HighSpeed, channel, timer};
+
+// For the Servo
+use embedded_hal::pwm::SetDutyCycle;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -40,32 +42,66 @@ async fn main(spawner: Spawner) -> ! {
     // TODO: Spawn some tasks
     let _ = spawner;
 
-    // LEDC setup
-    let mut ledc = Ledc::new(peripherals.LEDC);
-    let led = peripherals.GPIO5;
+    //Servo setup
+    let mut servo = peripherals.GPIO33;
 
-    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
-    let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
+    // LEDC setup
+    let ledc = Ledc::new(peripherals.LEDC);
+    //let led = peripherals.GPIO5;
+
+    let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
     
-    lstimer0.configure(timer::config::Config {
-        duty: timer::config::Duty::Duty5Bit,
-        clock_source: timer::LSClockSource::APBClk,
-        frequency: Rate::from_khz(1),
+    hstimer0.configure(timer::config::Config {
+        duty: timer::config::Duty::Duty12Bit,
+        clock_source: timer::HSClockSource::APBClk,
+        frequency: Rate::from_hz(50),
     })
     .unwrap();
 
-    let mut channel0 = ledc.channel(channel::Number::Channel0, led);
+    let mut channel0 = ledc.channel(channel::Number::Channel0, servo.reborrow());
     channel0.configure(channel::config::Config {
-        timer: &lstimer0,
+        timer: &hstimer0,
         duty_pct: 10,
         drive_mode: DriveMode::PushPull,
     })
     .unwrap();
 
+    
+
+
+
+
+    let max_duty_cycle = channel0.max_duty_cycle() as u32;
+    let duty = 512;
+    channel0.set_duty_cycle(duty).unwrap();
+    let min_duty = (25 * max_duty_cycle) / 1000; //  2.5% duty cycle
+    let max_duty = (125 * max_duty_cycle) / 1000; // 12.5% duty cycle
+
+    let duty_gap = max_duty - min_duty; // 512 - 102 = 410
+
+
+
     loop {
-            channel0.start_duty_fade(0, 100, 200).unwrap();
-            while channel0.is_duty_fade_running() {}
-            channel0.start_duty_fade(100, 0, 2000).unwrap();
-             while channel0.is_duty_fade_running() {}
+            // channel0.start_duty_fade(0, 100, 200).unwrap();
+            // while channel0.is_duty_fade_running() {}
+            // channel0.start_duty_fade(100, 0, 2000).unwrap();
+            //  while channel0.is_duty_fade_running() {}
+
+            let duty = duty_from_angle(0, min_duty, duty_gap);
+            channel0.set_duty_cycle(duty).unwrap();
+
+            Timer::after(Duration::from_secs(2)).await; // Timer::after is async and delay.delay_millis(1500); is blocking
+
+            let duty = duty_from_angle(180, min_duty, duty_gap);
+            channel0.set_duty_cycle(duty).unwrap(); // unwrap is for error handling
+
+            Timer::after(Duration::from_secs(2)).await;
+   
     }
+}
+
+fn duty_from_angle(deg: u32, min_duty: u32, duty_gap: u32) -> u16 {
+    let duty = min_duty + ((deg * duty_gap) / 180);
+
+    duty as u16
 }

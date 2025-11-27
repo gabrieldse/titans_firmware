@@ -1073,6 +1073,7 @@ dependencies = [
  "embassy-executor",
  "embassy-time",
  "embedded-hal 1.0.0",
+ "embedded-io-async 0.7.0",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",

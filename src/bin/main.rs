@@ -26,6 +26,11 @@ use esp_hal::ledc::{ Ledc, HighSpeed, channel, timer};
 // For the Servo
 use embedded_hal::pwm::SetDutyCycle;
 
+// For the Radio
+use esp_hal::uart::{Config, Uart};
+use embedded_io_async::Read;
+
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
@@ -41,6 +46,12 @@ async fn main(spawner: Spawner) -> ! {
     info!("Embassy initialized!");
     // TODO: Spawn some tasks
     let _ = spawner;
+
+    // Radio setup
+    let uart_config = Config::default().with_baudrate(420_000);
+    let mut uart1 = Uart::new(peripherals.UART1, uart_config).unwrap().with_rx(peripherals.GPIO16).with_tx(peripherals.GPIO17);
+    let (mut rx, _tx) = uart1.into_async().split();
+    let mut buf = [0u8; 100];
 
     //Servo setup
     let mut servo = peripherals.GPIO33;
@@ -66,10 +77,6 @@ async fn main(spawner: Spawner) -> ! {
     })
     .unwrap();
 
-    
-
-
-
 
     let max_duty_cycle = channel0.max_duty_cycle() as u32;
     let duty = 512;
@@ -78,6 +85,8 @@ async fn main(spawner: Spawner) -> ! {
     let max_duty = (125 * max_duty_cycle) / 1000; // 12.5% duty cycle
 
     let duty_gap = max_duty - min_duty; // 512 - 102 = 410
+    
+
 
 
 
@@ -86,7 +95,18 @@ async fn main(spawner: Spawner) -> ! {
             // while channel0.is_duty_fade_running() {}
             // channel0.start_duty_fade(100, 0, 2000).unwrap();
             //  while channel0.is_duty_fade_running() {}
-
+            
+            // Radio
+            let res = rx.read_async(&mut buf).await;
+            match res {
+                Ok(count) => {
+                    if count > 0 {
+                        info!("Received {} bytes: {:?}", count, &buf[0..count]);
+                    }
+                },
+                Err(e) => info!("UART Error: {:?}", e),
+            }
+            
             let duty = duty_from_angle(0, min_duty, duty_gap);
             channel0.set_duty_cycle(duty).unwrap();
 

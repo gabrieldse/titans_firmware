@@ -75,7 +75,7 @@ async fn main(spawner: Spawner) -> ! {
         .configure(timer::config::Config {
             duty: timer::config::Duty::Duty12Bit,
             clock_source: timer::HSClockSource::APBClk,
-            frequency: Rate::from_hz(50), // 50Hz - frequency of motor PWM signal
+            frequency: Rate::from_hz(2000), // 50Hz - frequency of motor PWM signal
         })
         .unwrap();
 
@@ -110,10 +110,10 @@ async fn main(spawner: Spawner) -> ! {
     let mut lmotor_pwm: u16;
     let mut rmotor_pwm: u16;
 
-    let mut in1_state;
-    let mut in2_state;
-    let mut in3_state;
-    let mut in4_state;
+    let mut in1_state: bool;
+    let mut in2_state: bool;
+    let mut in3_state: bool;
+    let mut in4_state: bool;
 
     // let duty = 512;
     // channel0.set_duty_cycle(duty).unwrap();
@@ -123,6 +123,24 @@ async fn main(spawner: Spawner) -> ! {
     // let duty_gap = max_duty - min_duty; // 512 - 102 = 410
 
     loop {
+        // Test code - move forward at half speed
+        // in1_pin.set_high();
+        // in2_pin.set_low();
+        // in3_pin.set_high();
+        // in4_pin.set_low();
+
+        // channel0.set_duty_cycle(60000).unwrap();
+        // channel1.set_duty_cycle(60000).unwrap();
+
+        // in1_pin.set_high();
+        // in2_pin.set_low();
+
+        // for duty in [0, 500, 1000, 2000, 3000, 4000, 5000, 10000, 50000, 60000] {
+        //     channel0.set_duty_cycle(duty).unwrap();
+        //     embassy_time::Timer::after_millis(500).await;
+        //     info!("Velocidade {}", duty);
+        // }
+
         // Read radio commands
         match rx.read_async(&mut buf).await {
             Ok(count) => {
@@ -186,50 +204,75 @@ fn gas_steering_to_diff_wheel(
     max_duty: u32,
     deadzone: u32,
 ) -> (u16, u16, bool, bool, bool, bool) {
-    let mean_u16 = u16::MAX / 2;
+    let mean = u16::MAX / 2;
 
-    let mut lmotor_pwm: u32 = min_duty;
-    let mut rmotor_pwm: u32 = min_duty;
+    let mut in1;
+    let mut in2;
+    let mut in3;
+    let mut in4;
 
-    let mut in1: bool = false;
-    let mut in2: bool = false;
-    let mut in3: bool = false;
-    let mut in4: bool = false;
-
-    // Dont move if in deadzone
-    if gas < (mean_u16 + deadzone as u16) && gas > (mean_u16 - deadzone as u16)
-        && gas | steering > (mean_u16 - deadzone as u16)
+    // -------------------------------
+    // 1. DEADZONE
+    // -------------------------------
+    if (gas > mean - deadzone as u16 && gas < mean + deadzone as u16)
+        && (steering > mean - deadzone as u16 && steering < mean + deadzone as u16)
     {
-        return (lmotor_pwm as u16, rmotor_pwm as u16, in1, in2, in3, in4);
+        return (0, 0, false, false, false, false);
     }
 
-    if steering > mean_u16 {
-        // Turn right
-        let steering_offset = steering - mean_u16;
+    // -------------------------------
+    // 2. NORMALIZA GAS E STEERING
+    // -------------------------------
+    let gas_norm = gas as i32 - mean as i32; // -32768..32767 (frente/tras)
+    let steering_norm = steering as i32 - mean as i32; // -32768..32767 (esq/dir)
 
-        lmotor_pwm = min_duty
-            + ((max_duty - min_duty) as u32 * (steering_offset as u32) / (mean_u16 as u32));
-        rmotor_pwm = min_duty;
+    // -------------------------------
+    // 3. PWM BASE (vem do GAS)
+    // -------------------------------
+    let gas_abs = gas_norm.abs() as u32;
+    let max_range = mean as u32;
+
+    let base_pwm = min_duty + (gas_abs * (max_duty - min_duty) / max_range);
+
+    // -------------------------------
+    // 4. PWM DIFERENCIAL (vira)
+    // -------------------------------
+    let steer_abs = steering_norm.abs() as u32;
+
+    let steer_pwm = steer_abs * (max_duty - min_duty) / max_range;
+
+    let (mut lmotor_pwm, mut rmotor_pwm) = if steering_norm > 0 {
+        // virar à direita
+        (
+            base_pwm,                           // esquerda mais forte
+            base_pwm.saturating_sub(steer_pwm), // direita reduzida
+        )
     } else {
-        // Turn left
-        let steering_offset = mean_u16 - steering;
-        lmotor_pwm = min_duty;
-        rmotor_pwm = min_duty
-            + ((max_duty - min_duty) as u32 * (steering_offset as u32) / (mean_u16 as u32));
-    }
+        // virar à esquerda
+        (
+            base_pwm.saturating_sub(steer_pwm), // esquerda reduzida
+            base_pwm,                           // direita mais forte
+        )
+    };
 
-    // Decide if forward or backward differential drive
-    if gas >= (mean_u16) {
-        // Forward
+    // saturação
+    lmotor_pwm = lmotor_pwm.clamp(min_duty, max_duty);
+    rmotor_pwm = rmotor_pwm.clamp(min_duty, max_duty);
+
+    // -------------------------------
+    // 5. DIREÇÃO DOS PINOS IN1..IN4
+    // -------------------------------
+    if gas_norm >= 0 {
+        // Frente
         in1 = true;
-        in3 = true;
         in2 = false;
+        in3 = true;
         in4 = false;
     } else {
-        // Backward
+        // Ré
         in1 = false;
-        in3 = false;
         in2 = true;
+        in3 = false;
         in4 = true;
     }
 
@@ -241,8 +284,19 @@ fn cast_to_u16(value: u16, max: u16, min: u16) -> u16 {
         u16::MAX
     } else if value <= min {
         u16::MIN
+        // Código Corrigido para Mapeamento Linear:
     } else {
-        (value / (max - min) * (u16::MAX)) as u16
+        // 1. Subtrai o mínimo (desloca para 0)
+        let shifted_value = value - min;
+        // 2. Calcula o intervalo de entrada
+        let input_range = max - min;
+
+        // 3. Multiplica pelo intervalo de saída (u16::MAX) ANTES da divisão para evitar underflow para zero
+        // Adicione 1 à u16::MAX para mapear corretamente (0 a 65535, total de 65536 valores)
+        let output_range_u32 = u16::MAX as u32 + 1;
+
+        // Usa u32 para a multiplicação para evitar overflow, depois divide.
+        ((shifted_value as u32 * output_range_u32) / (input_range as u32)) as u16
     }
 }
 
